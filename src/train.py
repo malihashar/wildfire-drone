@@ -167,6 +167,7 @@ def main(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
+        stride=args.stride,
     )
     print(f"  Train batches: {len(train_loader)}")
     print(f"  Val   batches: {len(val_loader)}")
@@ -296,6 +297,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--window",       type=int, default=20)
     p.add_argument("--checkpoint",   type=str, default="models/convlstm")
     p.add_argument("--num_workers",  type=int, default=0)
+    p.add_argument("--stride",       type=int, default=1,
+                   help="Window stride (default 1). Use 10 on CPU to reduce I/O by ~10x.")
     p.add_argument("--device",       type=str, default="auto")
     p.add_argument("--focal",        action="store_true",
                    help="Use Focal loss instead of BCE")
