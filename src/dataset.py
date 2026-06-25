@@ -143,7 +143,7 @@ class WildfireDataset(Dataset):
 
         for entry in entries:
             raw_path = entry.get("path", "")
-            sim_name = Path(raw_path).name
+            sim_name = Path(raw_path.replace("\\", "/")).name
             sim_path = self.sim_dir / sim_name
 
             T = int(entry["timesteps"])
