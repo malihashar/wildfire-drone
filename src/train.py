@@ -179,7 +179,11 @@ def main(args: argparse.Namespace) -> None:
         kernel_size  = 3,
         proj_channels= 32,
         dropout      = 0.1,
-    ).to(device)
+    )
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs (DataParallel)")
+        model = nn.DataParallel(model)
+    model = model.to(device)
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {params:,}")
 
@@ -247,16 +251,20 @@ def main(args: argparse.Namespace) -> None:
         }
         history.append(record)
 
+        # unwrap DataParallel before saving so checkpoints load on any hardware
+        raw_state = (model.module if isinstance(model, nn.DataParallel)
+                     else model).state_dict()
+
         # save best checkpoint
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             ckpt_path = ckpt_dir / "best_model.pt"
             torch.save(
                 {
-                    "epoch":      epoch,
-                    "model_state_dict":     model.state_dict(),
+                    "epoch":       epoch,
+                    "model_state_dict":     raw_state,
                     "optimizer_state_dict": optimizer.state_dict(),
-                    "val_loss":   val_loss,
+                    "val_loss":    val_loss,
                     "val_metrics": val_metrics,
                 },
                 ckpt_path,
@@ -267,7 +275,7 @@ def main(args: argparse.Namespace) -> None:
         torch.save(
             {
                 "epoch":      epoch,
-                "model_state_dict":     model.state_dict(),
+                "model_state_dict":     raw_state,
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": scheduler.state_dict(),
                 "val_loss":   val_loss,
