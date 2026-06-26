@@ -168,6 +168,7 @@ def main(args: argparse.Namespace) -> None:
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
         stride=args.stride,
+        sim_dir=args.sim_dir if args.sim_dir else None,
     )
     print(f"  Train batches: {len(train_loader)}")
     print(f"  Val   batches: {len(val_loader)}")
@@ -312,6 +313,8 @@ def parse_args() -> argparse.Namespace:
                    help="Use Focal loss instead of BCE")
     p.add_argument("--resume",       type=str, default=None,
                    help="Path to latest_model.pt to resume training")
+    p.add_argument("--sim_dir",      type=str, default=None,
+                   help="Override simulation files directory (e.g. symlink dir on Kaggle)")
     return p.parse_args()
 
 

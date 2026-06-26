@@ -202,6 +202,7 @@ def build_loaders(
     num_workers:  int  = 0,
     pin_memory:   bool = False,
     stride:       int  = 1,
+    sim_dir:      str | Path | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """
     Returns (train_loader, val_loader, test_loader).
@@ -209,10 +210,14 @@ def build_loaders(
     Training loader uses SimulationGroupedSampler so each simulation
     file is loaded exactly once per epoch (cache-friendly).
     Val/test loaders use default sequential order.
+
+    sim_dir : override the default <dataset_root>/simulations directory.
+              Useful on Kaggle where .pt files live across multiple input dirs
+              that are symlinked into a single flat directory.
     """
     root      = Path(dataset_root)
     norm_json = root / "normalization.json"
-    sim_dir   = root / "simulations"
+    sim_dir   = Path(sim_dir) if sim_dir else root / "simulations"
 
     def _make(split: str, shuffle: bool) -> DataLoader:
         ds = WildfireDataset(
