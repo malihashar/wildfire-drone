@@ -16,6 +16,11 @@ from src.vision.yolo_fire_adapter import (
     detections_to_fire_grid,
     overlay_grid_on_image,
 )
+from src.vision.convlstm_bridge import (
+    load_convlstm_checkpoint,
+    load_terrain_weather_from_simulation,
+    predict_next_fire_from_grid,
+)
 
 __all__ = [
     "FireGridConfig",
@@ -26,4 +31,7 @@ __all__ = [
     "cell_to_image_rect",
     "detections_to_fire_grid",
     "overlay_grid_on_image",
+    "load_convlstm_checkpoint",
+    "load_terrain_weather_from_simulation",
+    "predict_next_fire_from_grid",
 ]

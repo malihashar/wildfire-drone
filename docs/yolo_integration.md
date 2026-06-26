@@ -72,6 +72,68 @@ For a single still image, repeat the detected fire-state grid across the 20
 timesteps. For real drone video, maintain a rolling buffer of the last 20
 observed fire grids.
 
+The YOLO model only provides channel `0`. To run the ConvLSTM, channels `1-9`
+must come from terrain/weather data that matches the training layout:
+
+```text
+1  Potential ROS
+2  Fireline Intensity
+3  Vegetation Density
+4  Slope
+5  Aspect Cosine
+6  Aspect Sine
+7  Wind Speed
+8  Wind Dir Cosine
+9  Wind Dir Sine
+```
+
+For the current Kaggle prototype, use `load_terrain_weather_from_simulation()`
+to borrow these channels from an existing simulator `.pt` file and
+`predict_next_fire_from_grid()` to run a trained ConvLSTM checkpoint:
+
+```python
+import glob
+import matplotlib.pyplot as plt
+from src.vision import (
+    YoloFireSegmenter,
+    load_terrain_weather_from_simulation,
+    predict_next_fire_from_grid,
+)
+
+yolo = YoloFireSegmenter(
+    model_path="/kaggle/working/yolo_fire_runs/wildfire_dataset2_finetune/weights/best.pt",
+    device="0",
+)
+
+img_path = "/path/to/drone_image.jpg"
+grid_result = yolo.predict_grid(img_path)
+
+sim_path = glob.glob("/kaggle/working/simulations/*.pt")[0]
+terrain_weather = load_terrain_weather_from_simulation(
+    sim_path,
+    start_t=0,
+    timesteps=20,
+    norm_json="/kaggle/working/wildfire-drone/dataset/normalization.json",
+)
+
+pred = predict_next_fire_from_grid(
+    grid_result.fire_state_grid,
+    terrain_weather,
+    checkpoint_path="/kaggle/working/wildfire-drone/models/convlstm/best_model.pt",
+    timesteps=20,
+    device="cuda",
+)
+
+plt.imshow(pred, cmap="hot", vmin=0, vmax=1)
+plt.title("ConvLSTM Next-Fire Probability")
+plt.colorbar()
+plt.show()
+```
+
+This is a valid end-to-end smoke test, but it is not yet a physically grounded
+drone deployment because the terrain/weather channels are borrowed from a
+simulator sample rather than measured for the drone scene.
+
 ## Public Fine-Tuning Datasets
 
 Recommended sources:
