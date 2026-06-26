@@ -2,8 +2,8 @@
 YOLO fire detection adapter.
 
 This module is the boundary between computer vision and the existing wildfire
-ConvLSTM. It converts YOLO fire/smoke segmentation masks into the fire-state
-channel expected by the simulator-trained model:
+ConvLSTM. It converts YOLO fire/smoke segmentation masks or detection boxes
+into the fire-state channel expected by the simulator-trained model:
 
     0 = unburned / no observed active fire
     1 = burning / observed active fire
@@ -30,10 +30,10 @@ FIRE_STATE_BURNING = 1
 
 @dataclass(frozen=True)
 class FireGridConfig:
-    """Configuration for projecting YOLO masks into the ConvLSTM grid."""
+    """Configuration for projecting YOLO outputs into the ConvLSTM grid."""
 
     grid_shape: tuple[int, int] = (100, 100)
-    fire_classes: frozenset[str] = frozenset({"fire", "flame"})
+    fire_classes: frozenset[str] = frozenset({"fire", "flame", "wildfire"})
     smoke_classes: frozenset[str] = frozenset({"smoke"})
     fire_conf_threshold: float = 0.25
     smoke_conf_threshold: float = 0.40
@@ -66,13 +66,30 @@ class FireMaskDetection:
 
 
 @dataclass(frozen=True)
+class FireBoxDetection:
+    """
+    One fire/smoke object detection output in original image coordinates.
+
+    Box-based grids are less precise than mask-based grids, but they let the
+    current YOLO detection model feed the ConvLSTM fire channel immediately.
+    """
+
+    box_xyxy: tuple[float, float, float, float]
+    class_name: str
+    confidence: float
+
+
+FireDetection = FireMaskDetection | FireBoxDetection
+
+
+@dataclass(frozen=True)
 class FireGridResult:
     """Outputs produced by projecting detections into a 100x100 grid."""
 
     fire_state_grid: np.ndarray
     evidence_grid: np.ndarray
     image_evidence: np.ndarray
-    used_detections: list[FireMaskDetection] = field(default_factory=list)
+    used_detections: list[FireDetection] = field(default_factory=list)
 
 
 def _class_weight(class_name: str, config: FireGridConfig) -> float:
@@ -102,6 +119,24 @@ def _resize_mask(mask: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
     return np.clip(resized, 0.0, 1.0)
 
 
+def _box_to_mask(
+    box_xyxy: tuple[float, float, float, float],
+    image_shape: tuple[int, int],
+) -> np.ndarray:
+    """Rasterize an `xyxy` detection box into a binary image-space mask."""
+    image_h, image_w = image_shape
+    x0, y0, x1, y1 = box_xyxy
+    x0_i = max(0, min(image_w, int(np.floor(x0))))
+    y0_i = max(0, min(image_h, int(np.floor(y0))))
+    x1_i = max(0, min(image_w, int(np.ceil(x1))))
+    y1_i = max(0, min(image_h, int(np.ceil(y1))))
+
+    mask = np.zeros((image_h, image_w), dtype=np.float32)
+    if x1_i > x0_i and y1_i > y0_i:
+        mask[y0_i:y1_i, x0_i:x1_i] = 1.0
+    return mask
+
+
 def _area_pool_to_grid(
     evidence: np.ndarray,
     grid_shape: tuple[int, int],
@@ -114,12 +149,12 @@ def _area_pool_to_grid(
 
 
 def detections_to_fire_grid(
-    detections: Iterable[FireMaskDetection],
+    detections: Iterable[FireDetection],
     image_shape: tuple[int, int],
     config: FireGridConfig | None = None,
 ) -> FireGridResult:
     """
-    Convert fire/smoke masks into a ConvLSTM-compatible fire-state grid.
+    Convert fire/smoke masks or boxes into a ConvLSTM-compatible fire-state grid.
 
     The returned `fire_state_grid` is shaped (100, 100) by default and contains
     only values 0 and 1. Burned-state value 2 is intentionally not inferred from
@@ -138,7 +173,10 @@ def detections_to_fire_grid(
         if weight <= 0.0:
             continue
 
-        mask = _resize_mask(det.mask, image_shape)
+        if isinstance(det, FireMaskDetection):
+            mask = _resize_mask(det.mask, image_shape)
+        else:
+            mask = _box_to_mask(det.box_xyxy, image_shape)
         contribution = np.clip(mask * det.confidence * weight, 0.0, 1.0)
         image_evidence = np.maximum(image_evidence, contribution)
         used.append(det)
@@ -241,10 +279,11 @@ def build_convlstm_sequence(
 
 class YoloFireSegmenter:
     """
-    Thin wrapper around Ultralytics YOLO11 segmentation for fire-grid inference.
+    Thin wrapper around Ultralytics YOLO11 for fire-grid inference.
 
     Ultralytics is imported lazily so the rest of the repository remains usable
-    in environments where YOLO is not installed.
+    in environments where YOLO is not installed. Segmentation models use masks;
+    detection models fall back to bounding boxes.
     """
 
     def __init__(
@@ -265,7 +304,7 @@ class YoloFireSegmenter:
         self.device = device
 
     def predict_grid(self, image: np.ndarray | str | Path) -> FireGridResult:
-        """Run YOLO segmentation and return the 100x100 fire grid result."""
+        """Run YOLO inference and return the 100x100 fire grid result."""
         results = self.model.predict(
             image,
             conf=min(self.config.fire_conf_threshold, self.config.smoke_conf_threshold),
@@ -284,25 +323,37 @@ class YoloFireSegmenter:
         self,
         result: Any,
         image_shape: tuple[int, int],
-    ) -> list[FireMaskDetection]:
-        if result.masks is None or result.boxes is None:
+    ) -> list[FireDetection]:
+        if result.boxes is None:
             return []
 
-        masks = result.masks.data.detach().cpu().numpy()
         cls_ids = result.boxes.cls.detach().cpu().numpy().astype(int)
         confs = result.boxes.conf.detach().cpu().numpy()
         boxes = result.boxes.xyxy.detach().cpu().numpy()
         names = result.names
 
-        detections: list[FireMaskDetection] = []
-        for mask, cls_id, conf, box in zip(masks, cls_ids, confs, boxes):
+        detections: list[FireDetection] = []
+        if result.masks is not None:
+            masks = result.masks.data.detach().cpu().numpy()
+            for mask, cls_id, conf, box in zip(masks, cls_ids, confs, boxes):
+                class_name = str(names.get(int(cls_id), cls_id)).lower()
+                detections.append(
+                    FireMaskDetection(
+                        mask=_resize_mask(mask, image_shape),
+                        class_name=class_name,
+                        confidence=float(conf),
+                        box_xyxy=tuple(float(v) for v in box),
+                    )
+                )
+            return detections
+
+        for cls_id, conf, box in zip(cls_ids, confs, boxes):
             class_name = str(names.get(int(cls_id), cls_id)).lower()
             detections.append(
-                FireMaskDetection(
-                    mask=_resize_mask(mask, image_shape),
+                FireBoxDetection(
+                    box_xyxy=tuple(float(v) for v in box),
                     class_name=class_name,
                     confidence=float(conf),
-                    box_xyxy=tuple(float(v) for v in box),
                 )
             )
         return detections

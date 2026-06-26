@@ -8,6 +8,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.vision import (
+    FireBoxDetection,
     FireGridConfig,
     FireMaskDetection,
     build_convlstm_sequence,
@@ -43,6 +44,43 @@ class TestYoloFireAdapter(unittest.TestCase):
 
         self.assertEqual(int(result.fire_state_grid.sum()), 0)
         self.assertEqual(len(result.used_detections), 0)
+
+    def test_wildfire_box_projects_to_binary_grid(self):
+        det = FireBoxDetection(
+            box_xyxy=(50.0, 50.0, 100.0, 100.0),
+            class_name="wildfire",
+            confidence=0.9,
+        )
+
+        result = detections_to_fire_grid(
+            [det],
+            image_shape=(200, 200),
+            config=FireGridConfig(grid_shape=(100, 100), grid_threshold=0.2),
+        )
+
+        self.assertGreater(result.fire_state_grid.sum(), 0)
+        self.assertEqual(len(result.used_detections), 1)
+        self.assertEqual(set(np.unique(result.fire_state_grid)).issubset({0, 1}), True)
+
+    def test_smoke_box_uses_weaker_evidence(self):
+        det = FireBoxDetection(
+            box_xyxy=(0.0, 0.0, 100.0, 100.0),
+            class_name="smoke",
+            confidence=0.9,
+        )
+
+        result = detections_to_fire_grid(
+            [det],
+            image_shape=(100, 100),
+            config=FireGridConfig(
+                grid_shape=(100, 100),
+                smoke_weight=0.35,
+                grid_threshold=0.5,
+            ),
+        )
+
+        self.assertEqual(int(result.fire_state_grid.sum()), 0)
+        self.assertGreater(result.evidence_grid.sum(), 0)
 
     def test_cell_to_image_rect_maps_grid_bounds(self):
         image_shape = (200, 400)

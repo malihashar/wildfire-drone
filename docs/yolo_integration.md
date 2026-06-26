@@ -5,7 +5,7 @@ channel. It does not change the simulator, dataset format, or ConvLSTM model.
 
 ## Model Choice
 
-Use Ultralytics YOLO11 segmentation as the default computer vision model.
+Use Ultralytics YOLO11 as the default computer vision model.
 
 Recommended starting model:
 
@@ -13,10 +13,11 @@ Recommended starting model:
 yolo11s-seg.pt
 ```
 
-`yolo11s-seg` is a practical first choice because it returns instance masks,
-class labels, confidences, and boxes while remaining small enough for drone
-or Kaggle GPU inference. If speed is the bottleneck, use `yolo11n-seg.pt`. If
-small or distant fires are missed, try `yolo11m-seg.pt`.
+`yolo11s-seg` is the preferred long-term model because masks make cleaner
+fire grids. The current trained model is a YOLO11 detection model, so the
+adapter also supports bounding boxes and rasterizes them into a 100x100 grid.
+If speed is the bottleneck, use `yolo11n.pt` or `yolo11n-seg.pt`. If small or
+distant fires are missed, try `yolo11m.pt` or `yolo11m-seg.pt`.
 
 ## Output Contract
 
@@ -36,13 +37,17 @@ contain enough temporal evidence to infer burned cells safely.
 
 ## Image-To-Grid Flow
 
-1. Run YOLO11 segmentation on the drone RGB image.
+1. Run YOLO11 detection or segmentation on the drone RGB image.
 2. Keep `fire` and `smoke` detections above class-specific confidence thresholds.
-3. Convert each mask back into original image coordinates.
+3. Convert each mask or box back into original image coordinates.
 4. Build an image-space evidence map.
 5. Fuse multiple detections with max confidence.
 6. Downsample evidence into a 100x100 grid using area pooling.
 7. Threshold the evidence grid into the ConvLSTM fire-state grid.
+
+For detection models, the adapter fills the bounding-box region. This is an
+approximation and tends to overestimate the burning area. For segmentation
+models, the adapter uses masks and produces a tighter grid.
 
 Default thresholds:
 

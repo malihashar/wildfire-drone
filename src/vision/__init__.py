@@ -7,6 +7,7 @@ simulator, dataset tensor format, or ConvLSTM model.
 """
 
 from src.vision.yolo_fire_adapter import (
+    FireBoxDetection,
     FireGridConfig,
     FireMaskDetection,
     YoloFireSegmenter,
@@ -18,6 +19,7 @@ from src.vision.yolo_fire_adapter import (
 
 __all__ = [
     "FireGridConfig",
+    "FireBoxDetection",
     "FireMaskDetection",
     "YoloFireSegmenter",
     "build_convlstm_sequence",
