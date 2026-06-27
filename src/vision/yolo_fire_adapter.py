@@ -40,6 +40,9 @@ class FireGridConfig:
     grid_threshold: float = 0.25
     fire_weight: float = 1.0
     smoke_weight: float = 0.35
+    min_component_cells: int = 4
+    close_kernel_size: int = 0
+    close_iterations: int = 1
 
 
 @dataclass(frozen=True)
@@ -148,6 +151,66 @@ def _area_pool_to_grid(
     return np.clip(pooled, 0.0, 1.0)
 
 
+def _max_pool_to_grid(
+    evidence: np.ndarray,
+    grid_shape: tuple[int, int],
+) -> np.ndarray:
+    """
+    Downsample image-space evidence using max occupancy per output cell.
+
+    This is intentionally different from average pooling: thin fire fronts can
+    cover only a small fraction of a 100x100 cell, but they should survive the
+    image-to-grid projection if YOLO confidently segmented them.
+    """
+    image_h, image_w = evidence.shape
+    grid_h, grid_w = grid_shape
+    pooled = np.zeros((grid_h, grid_w), dtype=np.float32)
+
+    for row in range(grid_h):
+        y0 = int(np.floor(row * image_h / grid_h))
+        y1 = int(np.ceil((row + 1) * image_h / grid_h))
+        for col in range(grid_w):
+            x0 = int(np.floor(col * image_w / grid_w))
+            x1 = int(np.ceil((col + 1) * image_w / grid_w))
+            cell = evidence[y0:y1, x0:x1]
+            if cell.size:
+                pooled[row, col] = float(cell.max())
+
+    return np.clip(pooled, 0.0, 1.0)
+
+
+def _filter_fire_grid(grid: np.ndarray, config: FireGridConfig) -> np.ndarray:
+    """
+    Remove tiny isolated detections while preserving thin connected fronts.
+
+    We avoid morphological opening because erosion would delete narrow fire
+    fronts. Connected-component area filtering removes small specks directly.
+    """
+    binary = (grid > 0).astype(np.uint8)
+
+    if config.close_kernel_size > 1:
+        kernel_size = int(config.close_kernel_size)
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        binary = cv2.morphologyEx(
+            binary,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=max(1, int(config.close_iterations)),
+        )
+
+    min_area = max(0, int(config.min_component_cells))
+    if min_area <= 1:
+        return binary.astype(np.uint8)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    filtered = np.zeros_like(binary)
+    for label in range(1, num_labels):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area >= min_area:
+            filtered[labels == label] = FIRE_STATE_BURNING
+    return filtered.astype(np.uint8)
+
+
 def detections_to_fire_grid(
     detections: Iterable[FireDetection],
     image_shape: tuple[int, int],
@@ -163,7 +226,7 @@ def detections_to_fire_grid(
     cfg = config or FireGridConfig()
     image_h, image_w = image_shape
     image_evidence = np.zeros((image_h, image_w), dtype=np.float32)
-    used: list[FireMaskDetection] = []
+    used: list[FireDetection] = []
 
     for det in detections:
         if not _passes_threshold(det, cfg):
@@ -181,12 +244,13 @@ def detections_to_fire_grid(
         image_evidence = np.maximum(image_evidence, contribution)
         used.append(det)
 
-    evidence_grid = _area_pool_to_grid(image_evidence, cfg.grid_shape)
+    evidence_grid = _max_pool_to_grid(image_evidence, cfg.grid_shape)
     fire_state_grid = np.where(
         evidence_grid >= cfg.grid_threshold,
         FIRE_STATE_BURNING,
         FIRE_STATE_UNBURNED,
     ).astype(np.uint8)
+    fire_state_grid = _filter_fire_grid(fire_state_grid, cfg)
 
     return FireGridResult(
         fire_state_grid=fire_state_grid,
@@ -242,6 +306,50 @@ def overlay_grid_on_image(
     base = image_arr.astype(np.float32)
     blended = base * (1.0 - alpha * heat[..., None]) + color_arr * (alpha * heat[..., None])
     return np.clip(blended, 0, 255).astype(np.uint8)
+
+
+def plot_fire_grid_diagnostics(
+    image: np.ndarray | str | Path,
+    result: FireGridResult,
+    title: str | None = None,
+):
+    """
+    Create a side-by-side diagnostic figure for YOLO-to-grid quality review.
+
+    Panels are: original image, YOLO mask/evidence, binary 100x100 grid, and
+    grid overlay on the original image. Matplotlib is imported lazily so this
+    module remains usable in non-notebook environments.
+    """
+    import matplotlib.pyplot as plt
+
+    if isinstance(image, (str, Path)):
+        bgr = cv2.imread(str(image))
+        if bgr is None:
+            raise FileNotFoundError(f"Could not read image: {image}")
+        image_arr = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    else:
+        image_arr = np.asarray(image)
+
+    overlay = overlay_grid_on_image(image_arr, result.fire_state_grid)
+
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+    if title:
+        fig.suptitle(title)
+
+    axes[0].imshow(image_arr)
+    axes[0].set_title("Original Image")
+    axes[1].imshow(result.image_evidence, cmap="hot", vmin=0, vmax=1)
+    axes[1].set_title("YOLO Mask / Evidence")
+    axes[2].imshow(result.fire_state_grid, cmap="hot", vmin=0, vmax=1)
+    axes[2].set_title("100x100 Fire Grid")
+    axes[3].imshow(overlay)
+    axes[3].set_title("Grid Overlay")
+
+    for ax in axes:
+        ax.axis("off")
+
+    fig.tight_layout()
+    return fig
 
 
 def build_convlstm_sequence(

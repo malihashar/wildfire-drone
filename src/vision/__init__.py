@@ -15,11 +15,19 @@ from src.vision.yolo_fire_adapter import (
     cell_to_image_rect,
     detections_to_fire_grid,
     overlay_grid_on_image,
+    plot_fire_grid_diagnostics,
 )
 from src.vision.convlstm_bridge import (
     load_convlstm_checkpoint,
     load_terrain_weather_from_simulation,
     predict_next_fire_from_grid,
+)
+from src.vision.grid_analysis import (
+    FireGridStats,
+    compare_grid_distributions,
+    compute_fire_grid_stats,
+    load_simulator_fire_grids,
+    summarize_fire_grid_stats,
 )
 
 __all__ = [
@@ -31,7 +39,13 @@ __all__ = [
     "cell_to_image_rect",
     "detections_to_fire_grid",
     "overlay_grid_on_image",
+    "plot_fire_grid_diagnostics",
     "load_convlstm_checkpoint",
     "load_terrain_weather_from_simulation",
     "predict_next_fire_from_grid",
+    "FireGridStats",
+    "compute_fire_grid_stats",
+    "summarize_fire_grid_stats",
+    "compare_grid_distributions",
+    "load_simulator_fire_grids",
 ]

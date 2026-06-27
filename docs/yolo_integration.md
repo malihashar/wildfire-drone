@@ -13,11 +13,11 @@ Recommended starting model:
 yolo11s-seg.pt
 ```
 
-`yolo11s-seg` is the preferred long-term model because masks make cleaner
-fire grids. The current trained model is a YOLO11 detection model, so the
-adapter also supports bounding boxes and rasterizes them into a 100x100 grid.
-If speed is the bottleneck, use `yolo11n.pt` or `yolo11n-seg.pt`. If small or
-distant fires are missed, try `yolo11m.pt` or `yolo11m-seg.pt`.
+`yolo11s-seg` is the preferred model because masks preserve fire geometry.
+The current trained model is a YOLO11 detection model, so the adapter still
+supports bounding boxes as a fallback, but boxes are not the target interface
+for ConvLSTM quality. If speed is the bottleneck, use `yolo11n-seg.pt`. If
+small or distant fires are missed, try `yolo11m-seg.pt`.
 
 ## Output Contract
 
@@ -37,17 +37,20 @@ contain enough temporal evidence to infer burned cells safely.
 
 ## Image-To-Grid Flow
 
-1. Run YOLO11 detection or segmentation on the drone RGB image.
+1. Run YOLO11 segmentation on the drone RGB image.
 2. Keep `fire` and `smoke` detections above class-specific confidence thresholds.
-3. Convert each mask or box back into original image coordinates.
+3. Convert each mask back into original image coordinates.
 4. Build an image-space evidence map.
 5. Fuse multiple detections with max confidence.
-6. Downsample evidence into a 100x100 grid using area pooling.
-7. Threshold the evidence grid into the ConvLSTM fire-state grid.
+6. Rasterize evidence into a 100x100 grid using max occupancy so thin fire
+   fronts survive the downsample.
+7. Threshold the evidence grid into a binary ConvLSTM fire-state grid.
+8. Remove tiny isolated components with connected-component filtering.
 
-For detection models, the adapter fills the bounding-box region. This is an
-approximation and tends to overestimate the burning area. For segmentation
-models, the adapter uses masks and produces a tighter grid.
+For segmentation models, the adapter uses masks and preserves irregular fire
+boundaries. For detection models, the adapter fills bounding-box regions only
+when masks are unavailable. This is an approximation and tends to overestimate
+the burning area.
 
 Default thresholds:
 
@@ -55,10 +58,44 @@ Default thresholds:
 fire detection confidence  = 0.25
 smoke detection confidence = 0.40
 grid occupancy threshold   = 0.25
+minimum component size     = 4 grid cells
 ```
 
 Smoke is treated as weaker evidence than visible fire. Do not map the entire
 smoke plume as burning ground unless a later smoke-base estimator is added.
+
+The final channel `0` output remains binary:
+
+```text
+0 = unburned
+1 = burning
+```
+
+The confidence-valued `evidence_grid` is useful for visualization and threshold
+tuning, but it should not replace channel `0` unless the ConvLSTM is retrained
+for probabilistic fire-state input.
+
+## Quality Checks
+
+Use `plot_fire_grid_diagnostics()` to inspect:
+
+- original image
+- YOLO mask/evidence
+- generated 100x100 binary grid
+- overlay on the original image
+
+Use `compute_fire_grid_stats()` and `compare_grid_distributions()` to compare
+vision grids against simulator fire-state grids. The main statistics are:
+
+- burning cell percentage
+- connected component count
+- average connected-region size
+- boundary complexity
+- fire coverage
+
+The target is not maximum YOLO mAP by itself. The target is a mask-to-grid
+interface whose fire-state channel resembles simulator channel `0` closely
+enough for the ConvLSTM to consume it.
 
 ## ConvLSTM Integration
 
