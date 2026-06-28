@@ -16,6 +16,7 @@ import torch
 
 from src.convlstm import WildfireConvLSTM
 from src.dataset import NORM_CHANNELS
+from src.vision.paths import resolve_convlstm_checkpoint
 from src.vision.yolo_fire_adapter import build_convlstm_sequence
 
 
@@ -30,6 +31,16 @@ def resolve_device(device: str | torch.device = "auto") -> torch.device:
             return torch.device("mps")
         return torch.device("cpu")
     return torch.device(device)
+
+
+def resolve_yolo_device(device: str | torch.device = "auto") -> str:
+    """Map a torch device choice to an Ultralytics YOLO device string."""
+    torch_device = resolve_device(device)
+    if torch_device.type == "cuda":
+        return "0"
+    if torch_device.type == "mps":
+        return "mps"
+    return "cpu"
 
 
 def load_convlstm_checkpoint(
@@ -101,17 +112,20 @@ def load_terrain_weather_from_simulation(
 def predict_next_fire_from_grid(
     fire_state_grid: torch.Tensor | Any,
     terrain_weather: torch.Tensor | Any,
-    checkpoint_path: str | Path,
+    checkpoint_path: str | Path | None = None,
     timesteps: int = 20,
     device: str | torch.device = "auto",
 ) -> torch.Tensor:
     """
     Run ConvLSTM prediction from a YOLO fire grid and terrain/weather channels.
 
+    When `checkpoint_path` is omitted, uses `models/convlstm/best_model.pt`.
+
     Returns a CPU tensor shaped `(H, W)` with probabilities in `[0, 1]`.
     """
     torch_device = resolve_device(device)
-    model = load_convlstm_checkpoint(checkpoint_path, torch_device)
+    ckpt_path = resolve_convlstm_checkpoint(checkpoint_path)
+    model = load_convlstm_checkpoint(ckpt_path, torch_device)
     sequence = build_convlstm_sequence(
         fire_state_grid=fire_state_grid,
         terrain_weather=terrain_weather,

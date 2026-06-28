@@ -22,8 +22,10 @@ import cv2
 import numpy as np
 import torch
 
+from src.vision.paths import DEFAULT_YOLO_SEG_MODEL
 
-DEFAULT_YOLO_MODEL = "yolo11s-seg.pt"
+
+DEFAULT_YOLO_MODEL = DEFAULT_YOLO_SEG_MODEL
 FIRE_STATE_UNBURNED = 0
 FIRE_STATE_BURNING = 1
 

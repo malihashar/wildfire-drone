@@ -93,6 +93,16 @@ def aggregate_metrics(metric_list: list[dict[str, float]]) -> dict[str, float]:
     return {k: sum(m[k] for m in metric_list) / len(metric_list) for k in keys}
 
 
+def load_model_state(model: nn.Module, state_dict: dict[str, torch.Tensor]) -> None:
+    """Load checkpoints saved with or without DataParallel `module.` prefixes."""
+    target = model.module if isinstance(model, nn.DataParallel) else model
+    clean_state = {
+        key.removeprefix("module."): value
+        for key, value in state_dict.items()
+    }
+    target.load_state_dict(clean_state)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Training / Validation loops
 # ──────────────────────────────────────────────────────────────────────────────
@@ -211,7 +221,7 @@ def main(args: argparse.Namespace) -> None:
     # ── resume from checkpoint ────────────────────────────────────────────────
     if args.resume:
         ckpt = torch.load(args.resume, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
+        load_model_state(model, ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_epoch = ckpt["epoch"] + 1

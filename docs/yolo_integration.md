@@ -124,47 +124,53 @@ must come from terrain/weather data that matches the training layout:
 9  Wind Dir Sine
 ```
 
-For the current Kaggle prototype, use `load_terrain_weather_from_simulation()`
-to borrow these channels from an existing simulator `.pt` file and
-`predict_next_fire_from_grid()` to run a trained ConvLSTM checkpoint:
+## Product Flow (Default Model Paths)
+
+Place trained weights locally (gitignored under `models/`):
+
+| Asset | Default path |
+|-------|--------------|
+| YOLO segmentation | `models/yolo/fire_smoke_seg_best.pt` |
+| ConvLSTM (epoch 15) | `models/convlstm/best_model.pt` |
+| Normalization stats | `dataset/normalization.json` |
+
+The one-call entry point is `predict_wildfire_from_image()`:
 
 ```python
 import glob
 import matplotlib.pyplot as plt
+from src.vision import predict_wildfire_from_image
+
+result = predict_wildfire_from_image(
+    "/path/to/drone_image.jpg",
+    sim_path=glob.glob("dataset/simulations/*.pt")[0],
+    device="cuda",
+)
+
+plt.imshow(result.next_fire_probability, cmap="hot", vmin=0, vmax=1)
+plt.title("ConvLSTM Next-Fire Probability")
+plt.colorbar()
+plt.show()
+```
+
+CLI:
+
+```bash
+python scripts/predict_wildfire.py path/to/image.jpg --sim dataset/simulations/sim_000.pt
+```
+
+Lower-level helpers remain available if you need to inspect intermediate grids:
+
+```python
 from src.vision import (
     YoloFireSegmenter,
     load_terrain_weather_from_simulation,
     predict_next_fire_from_grid,
 )
 
-yolo = YoloFireSegmenter(
-    model_path="/kaggle/working/yolo_fire_runs/wildfire_dataset2_finetune/weights/best.pt",
-    device="0",
-)
-
-img_path = "/path/to/drone_image.jpg"
-grid_result = yolo.predict_grid(img_path)
-
-sim_path = glob.glob("/kaggle/working/simulations/*.pt")[0]
-terrain_weather = load_terrain_weather_from_simulation(
-    sim_path,
-    start_t=0,
-    timesteps=20,
-    norm_json="/kaggle/working/wildfire-drone/dataset/normalization.json",
-)
-
-pred = predict_next_fire_from_grid(
-    grid_result.fire_state_grid,
-    terrain_weather,
-    checkpoint_path="/kaggle/working/wildfire-drone/models/convlstm/best_model.pt",
-    timesteps=20,
-    device="cuda",
-)
-
-plt.imshow(pred, cmap="hot", vmin=0, vmax=1)
-plt.title("ConvLSTM Next-Fire Probability")
-plt.colorbar()
-plt.show()
+grid_result = YoloFireSegmenter().predict_grid("drone_image.jpg")
+terrain_weather = load_terrain_weather_from_simulation("sim.pt", timesteps=20)
+pred = predict_next_fire_from_grid(grid_result.fire_state_grid, terrain_weather)
 ```
 
 This is a valid end-to-end smoke test, but it is not yet a physically grounded
