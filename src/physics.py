@@ -42,8 +42,15 @@ def compute_slope_and_aspect(elevation: np.ndarray, dx: float, dy: float) -> Tup
     # Aspect: direction of steepest ascent (uphill)
     # y increases downwards, so North is -y.
     # atan2(dx, -dy) gives angle relative to -y axis.
-    aspect = np.degrees(np.arctan2(dZ_dx, -dZ_dy)) % 360.0
-    
+    # On perfectly flat terrain dZ_dy is +0.0, so -dZ_dy is -0.0, and IEEE-754
+    # atan2(0.0, -0.0) == pi (not 0) -- guard the flat case explicitly rather
+    # than rely on atan2's signed-zero behavior for an undefined direction.
+    aspect = np.where(
+        grad_magnitude > 0.0,
+        np.degrees(np.arctan2(dZ_dx, -dZ_dy)) % 360.0,
+        0.0,
+    )
+
     return slope, aspect
 
 def calculate_directional_ros(
