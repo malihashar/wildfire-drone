@@ -1,0 +1,81 @@
+<mxfile host="app.diagrams.net" agent="claude-code">
+  <diagram id="pipeline" name="Path Planning Pipeline">
+    <mxGraphModel dx="1483" dy="1162" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="static" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="STATIC DATA&#xa;Terrain / elevation&#xa;Vegetation / fuel&#xa;Slope" vertex="1">
+          <mxGeometry height="70" width="220" x="340" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="dynamic" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="DYNAMIC DATA&#xa;Current fire state, wind,&#xa;temperature, humidity" vertex="1">
+          <mxGeometry height="70" width="220" x="340" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="convlstm" parent="1" style="rounded=0;dashed=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="ConvLSTM MODEL&lt;br&gt;Future wildfire prediction&lt;br&gt;(fire spread / severity)&lt;br&gt;not implemented in this task&amp;nbsp;" vertex="1">
+          <mxGeometry height="80" width="240" x="330" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="targets" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="SUPPRESSION TARGETS&#xa;Location, predicted severity,&#xa;predicted damage / risk&#xa;(currently: documented synthetic placeholder)" vertex="1">
+          <mxGeometry height="80" width="260" x="320" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="nsga2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#000000;fontColor=#000000;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;" value="NSGA II&amp;nbsp; decides WHAT to do&lt;br&gt;Multi-objective mission optimization&lt;br&gt;maximize suppression effectiveness&lt;br&gt;minimize travel cost&lt;br&gt;(single-UAV, this project)" vertex="1">
+          <mxGeometry height="90" width="280" x="310" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="pareto" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="PARETO FRONT&#xa;Multiple trade-off&#xa;mission candidates" vertex="1">
+          <mxGeometry height="70" width="220" x="340" y="610" as="geometry" />
+        </mxCell>
+        <mxCell id="scoring" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="FINAL MISSION SCORING&#xa;Select one mission according&#xa;to project priorities (knee / utopia-nearest)" vertex="1">
+          <mxGeometry height="70" width="260" x="320" y="720" as="geometry" />
+        </mxCell>
+        <mxCell id="dstar" parent="1" style="rounded=0;dashed=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;" value="D* LITE decides HOW to travel&lt;br&gt;Detailed local path, obstacle avoidance,&lt;br&gt;dynamic replanning&lt;br&gt;not implemented in this task (stub)&amp;nbsp;" vertex="1">
+          <mxGeometry height="90" width="280" x="310" y="830" as="geometry" />
+        </mxCell>
+        <mxCell id="uav" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="UAV EXECUTION" vertex="1">
+          <mxGeometry height="50" width="160" x="370" y="960" as="geometry" />
+        </mxCell>
+        <mxCell id="newpred" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=12;align=center;verticalAlign=middle;" value="NEW FIRE PREDICTION" vertex="1">
+          <mxGeometry height="50" width="220" x="340" y="1050" as="geometry" />
+        </mxCell>
+        <mxCell id="note" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=11;fontStyle=2;align=left;verticalAlign=middle;spacing=8;" value="NSGA-II and D* Lite are sequential stages, not competing optimizers:&#xa;NSGA-II selects WHICH suppression targets and in what order (the mission).&#xa;D* Lite plans the detailed flight path BETWEEN those already-chosen targets." vertex="1">
+          <mxGeometry height="120" width="240" x="640" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="static" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="dynamic">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="dynamic" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="convlstm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="convlstm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="targets">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="targets" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="nsga2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="nsga2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="pareto">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="pareto" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="scoring">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="scoring" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="dstar">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="dstar" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="uav">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="uav" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;" target="newpred">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="newpred" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;exitX=0;exitY=0.5;entryX=0;entryY=0.5;fontSize=11;fontStyle=2;strokeColor=#000000;fontColor=#000000;" target="dynamic" value="REPLAN">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="180" y="1075" />
+              <mxPoint x="180" y="165" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;verticalAlign=middle;spacing=8;" value="Legend&#xa;Solid border = existing / this task&#xa;Dashed border = not yet implemented (future work)&#xa;Blue fill = NSGA-II (this task&#39;s contribution)" vertex="1">
+          <mxGeometry height="80" width="240" x="640" y="20" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

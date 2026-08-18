@@ -1,0 +1,4 @@
+n_targets,n_trials,mean_gen_95,std_gen_95,n_reached_gen_95,mean_gen_98,std_gen_98,n_reached_gen_98,mean_gen_99,std_gen_99,n_reached_gen_99
+10,1,5.0,0.0,1,37.0,0.0,1,37.0,0.0,1
+20,1,46.0,0.0,1,56.0,0.0,1,56.0,0.0,1
+30,1,31.0,0.0,1,31.0,0.0,1,31.0,0.0,1

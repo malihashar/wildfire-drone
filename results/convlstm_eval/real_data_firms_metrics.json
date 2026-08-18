@@ -1,0 +1,20 @@
+{
+  "region": "West Siberia ~65.5N 76E",
+  "source": "NASA FIRMS MODIS C6.1 global 24h active fire CSV",
+  "n_early_points": 1234,
+  "n_late_points": 492,
+  "model_metrics": {
+    "precision": 0.8443113721897523,
+    "recall": 0.597457624587044,
+    "f1": 0.699751372227245,
+    "iou": 0.5381679368772216
+  },
+  "bce_loss": 0.09840184450149536,
+  "persistence_baseline_metrics": {
+    "precision": 0.9999999953271028,
+    "recall": 0.9067796571746625,
+    "f1": 0.9511106080792741,
+    "iou": 0.9067796571746625
+  },
+  "limitation": "channel 0 is real; channels 1-9 are training-mean/neutral placeholders (see docstring)"
+}

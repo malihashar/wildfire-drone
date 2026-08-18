@@ -1,0 +1,2 @@
+n_targets,population_size,n_generations,runtime_s,n_pareto,selected_mission_index,selected_damage,selected_travel,selected_battery,best_damage,best_travel
+12,40,40,0.06155041593592614,15,7,4.887608464255517,173.90922809254812,173.90922809254812,5.789854321122174,163.87300565575407

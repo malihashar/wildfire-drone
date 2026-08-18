@@ -1,0 +1,14 @@
+{
+  "id": "muhammadalihashar/wildfirespreadts-prepare-real-data",
+  "title": "WildfireSpreadTS Prepare Real Data",
+  "code_file": "kaggle_prepare_real_data.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
