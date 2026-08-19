@@ -17,7 +17,7 @@ mission planning (synthetic targets; ConvLSTM integration pending).
 - Number of targets: **12**
 - Population size: **30**
 - Generations (max): **50**
-- Runtime: **0.069 s**
+- Runtime: **0.065 s**
 
 ### Checkpoint Summary
 
@@ -55,9 +55,9 @@ CSV: `csv/convergence_history.csv`, `csv/convergence_checkpoints.csv`
 
 | Targets | Mean Runtime (s) | Std (s) | Min | Max |
 |---:|---:|---:|---:|---:|
-| 10 | 0.018 | 0.001 | 0.017 | 0.019 |
-| 20 | 0.015 | 0.001 | 0.015 | 0.015 |
-| 30 | 0.016 | 0.000 | 0.016 | 0.016 |
+| 10 | 0.016 | 0.002 | 0.015 | 0.017 |
+| 20 | 0.014 | 0.000 | 0.014 | 0.014 |
+| 30 | 0.015 | 0.000 | 0.014 | 0.015 |
 
 ### Figures
 
@@ -75,9 +75,9 @@ CSV: `csv/runtime_scaling_trials.csv`, `csv/runtime_scaling_summary.csv`
 
 | Pop. Size | Mean Runtime (s) | Best Damage (mean±std) | Best Travel (mean±std) | Pareto Size (mean±std) |
 |---:|---:|---:|---:|---:|
-| 25 | 0.029 | 5.8134 ± 0.0000 | 136.9712 ± 7.3353 | 6.00 ± 0.00 |
-| 50 | 0.045 | 5.7924 ± 0.0000 | 137.3770 ± 35.4383 | 10.00 ± 0.00 |
-| 100 | 0.082 | 5.7634 ± 0.0707 | 122.0513 ± 13.7645 | 5.50 ± 0.71 |
+| 25 | 0.028 | 5.8134 ± 0.0000 | 136.9712 ± 7.3353 | 6.00 ± 0.00 |
+| 50 | 0.044 | 5.7924 ± 0.0000 | 137.3770 ± 35.4383 | 10.00 ± 0.00 |
+| 100 | 0.081 | 5.7634 ± 0.0707 | 122.0513 ± 13.7645 | 5.50 ± 0.71 |
 
 ### Figures
 
@@ -146,8 +146,8 @@ multi-front, wind-driven fire scenarios.
 
 | Scenario | Best Damage | Best Travel | Runtime (s) | Pareto Size |
 |---|---:|---:|---:|---:|
-| uniform | 5.5865 | 159.2589 | 0.064 | 8.0 |
-| clustered | 5.3012 | 73.1662 | 0.065 | 5.0 |
+| uniform | 5.5865 | 159.2589 | 0.066 | 8.0 |
+| clustered | 5.3012 | 73.1662 | 0.064 | 5.0 |
 | clustered_wind | 5.8686 | 63.5421 | 0.089 | 4.0 |
 
 ### Figures

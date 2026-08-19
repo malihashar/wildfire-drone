@@ -53,6 +53,12 @@ class MissionExecutionRequest:
     tick: int
     obstacle_cells: tuple[tuple[int, int], ...] = ()
     risk_map: PredictionRiskMap | None = None
+    # The ACTUAL value mission.fitness.objectives.objective_travel_distance
+    # computed for this mission during NSGA-II's fitness evaluation (continuous
+    # float coordinates, no rounding) -- not a re-derivation. None only for
+    # synthetic/test requests with no real NSGA-II mission behind them, in
+    # which case the executor falls back to its own rounded-cell estimate.
+    nsga2_travel_distance: float | None = None
 
 
 def build_execution_request(
@@ -92,6 +98,7 @@ def build_execution_request(
         tick=tick,
         obstacle_cells=obstacle_cells,
         risk_map=risk_map,
+        nsga2_travel_distance=scored.plan.objectives.travel_distance,
     )
 
 
@@ -101,10 +108,14 @@ class MissionExecutionResult:
     Outcome of executing/locally-planning a ``MissionExecutionRequest``.
 
     ``path_length`` is D* Lite's actual obstacle-aware route cost;
-    ``straight_line_length`` is what NSGA-II used internally as its
-    surrogate travel-cost objective (see ``mission.fitness.objectives.
-    objective_travel_distance``) — the two are recorded separately so the
-    deviation between the surrogate and the real route can be measured
+    ``straight_line_length`` is the SAME value ``mission.fitness.objectives.
+    objective_travel_distance`` computed during NSGA-II's fitness evaluation
+    for this exact mission (passed through via ``MissionExecutionRequest.
+    nsga2_travel_distance``, not re-derived on rounded grid cells — an
+    earlier version recomputed it from integer-rounded waypoints, which was
+    off by ~0.2% on average from the true NSGA-II value; fixed to use the
+    literal figure). The two are recorded separately so the deviation
+    between the surrogate and the real route can be measured
     (``path_length / straight_line_length``), not conflated.
     ``used_incremental_replan`` is True only when the active leg's D* Lite
     session state (g/rhs/queue) was genuinely reused this tick rather than
@@ -229,7 +240,11 @@ class DStarLiteMissionExecutor(MissionExecutor):
             full_path = list(first_leg_path) + rest_path[1:]
             total_cost = path_length(first_leg_path) + rest_cost
 
-        straight = sum(_euclid(a, b) for a, b in zip(cells, cells[1:]))
+        straight = (
+            request.nsga2_travel_distance
+            if request.nsga2_travel_distance is not None
+            else sum(_euclid(a, b) for a, b in zip(cells, cells[1:]))
+        )
 
         result = MissionExecutionResult(
             tick=request.tick,

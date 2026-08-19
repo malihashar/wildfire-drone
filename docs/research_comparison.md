@@ -190,6 +190,33 @@ checkpoint (still synthetic-only, see caveat above):
   such a comparison would not be meaningful without re-implementing the
   paper's exact multi-UAV setup.
 
+## Update: public API packaging + a real surrogate-distance bug found and fixed
+
+`NSGA2MissionOptimizer` is now the documented, tested public entry point:
+`from mission.optimizer import NSGA2MissionOptimizer, OptimizationResult,
+OptimizerConfig` (the bare import already worked via an existing lazy
+`__getattr__`; the package docstring previously discouraged it in favor of
+submodule imports, which was inconsistent — fixed). No algorithm changes.
+Tested in `tests/test_optimizer_public_api.py`.
+
+**Bug found while verifying Experiment 2's surrogate against the literal
+NSGA-II objective (as requested):** `DStarLiteMissionExecutor` recorded
+`straight_line_length` as a re-derivation from ROUNDED integer grid cells,
+not the actual continuous-coordinate value
+`mission.fitness.objectives.objective_travel_distance` computed during
+NSGA-II's fitness evaluation — despite the docstring claiming it was that
+value. Measured discrepancy: ~0.2% mean, ~0.34% max across 20 real runs —
+small, and it did not change Experiment 2's headline conclusion (D* Lite is
+~5-7% longer than the surrogate; re-run after the fix: mean deviation ratio
+1.057, unchanged to 3 decimal places), but it was factually incorrect as
+documented. Fixed by threading the actual value through
+`MissionExecutionRequest.nsga2_travel_distance`; the executor now reports
+the literal figure (proven bit-identical by
+`tests/test_architecture_fixes.py::
+TestSurrogateVsActualCost::test_reported_surrogate_is_bit_identical_to_nsga2s_own_objective`),
+with a rounded-cell fallback preserved only for synthetic/test requests that
+have no real NSGA-II mission behind them.
+
 ## Precise implementation status
 
 **IMPLEMENTED:**

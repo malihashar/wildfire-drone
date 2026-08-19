@@ -263,6 +263,44 @@ class TestSurrogateVsActualCost(unittest.TestCase):
         self.assertGreater(result.path_length, result.straight_line_length)
         self.assertGreater(result.deviation_ratio, 1.0)
 
+    def test_reported_surrogate_is_bit_identical_to_nsga2s_own_objective(self):
+        """
+        Regression test for a real bug: the executor used to RE-DERIVE the
+        surrogate distance from rounded-to-integer-cell waypoints (differing
+        from NSGA-II's actual continuous-coordinate objective by ~0.2% on
+        average), while claiming to report "what NSGA-II used". It now
+        receives and reports the literal value instead.
+        """
+        from mission.config.settings import (
+            GridConfig,
+            MissionConfig,
+            TargetGenerationConfig,
+        )
+        from mission.fitness.mission_selection import select_highest_scoring_mission
+        from mission.optimizer.nsga2 import NSGA2MissionOptimizer
+        from mission.simulation.environment import WildfireEnvironment
+
+        mission_cfg = MissionConfig(
+            grid=GridConfig(width=30, height=30),
+            targets=TargetGenerationConfig(min_targets=12, max_targets=12),
+            optimizer=OptimizerConfig(population_size=20, n_generations=20, max_mission_targets=5),
+            seed=7,
+        )
+        env = WildfireEnvironment.create_synthetic(mission_cfg)
+        opt_result = NSGA2MissionOptimizer(env, mission_cfg).optimize(seed=7)
+        self.assertGreater(opt_result.n_solutions, 0)
+        scored = select_highest_scoring_mission(opt_result)
+        true_nsga2_value = scored.plan.objectives.travel_distance
+
+        from mission.replanning.executor import build_execution_request
+
+        request = build_execution_request(env, scored, tick=0)
+        self.assertEqual(request.nsga2_travel_distance, true_nsga2_value)
+
+        result = DStarLiteMissionExecutor().execute(request)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.straight_line_length, true_nsga2_value)  # bit-identical, not just close
+
 
 # ── Issue 6: permutation decoding is a genuine feasible subset ─────────────
 

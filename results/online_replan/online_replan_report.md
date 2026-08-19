@@ -16,7 +16,7 @@ and D* Lite are integrated.
 
 ## Initial Mission
 
-- Optimization runtime: **0.013 s**
+- Optimization runtime: **0.009 s**
 - Pareto solutions: **5**
 - Mission score: **0.2404**
 - Order: `T8 → T3 → T5 → T4 → T0 → T9`
@@ -97,7 +97,7 @@ Summary: synthetic prediction tick 2 (3 patch(es)). Diff: added [10]; priorityΔ
 - New: `T0 → T4 → T5 → T3 → T9`
 - Score before: **0.2064**
 - Score after: **0.6414** (Δ = +0.4349)
-- Optimization runtime: **0.007 s**
+- Optimization runtime: **0.008 s**
 - Targets after update: **8**
 - Pareto solutions: **5**
 
