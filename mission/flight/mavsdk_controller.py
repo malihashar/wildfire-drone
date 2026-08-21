@@ -1,23 +1,4 @@
-"""
-MAVSDK flight-control layer.
 
-Executes the D* Lite routes produced for the NSGA-II-selected mission
-(``mission.replanning.executor.MissionExecutionResult``). This module does
-NOT select targets or plan routes -- it only flies the grid-cell paths it is
-given, converting them to GPS via a fixed local-tangent-plane ``GeoOrigin``
-(the rest of the pipeline is grid-only and carries no georeferencing yet).
-
-Two entry points, per the project's flight-control contract:
-  - ``arm_drone``  -- pre-arm health verification + arm.
-  - ``mission``    -- connect, arm, take off, fly the ordered routes with
-                       per-waypoint telemetry confirmation, return home, land.
-
-Replanning hook: ``mission`` accepts an optional ``replan_provider`` polled
-between waypoints. When D* Lite produces a new route for the leg currently
-being flown, a provider can hand it back here and the executor swaps the
-remaining queue -- no waypoint-sender rewrite required. No fake replanning
-logic is implemented; the hook is a no-op unless the caller supplies one.
-"""
 
 from __future__ import annotations
 
