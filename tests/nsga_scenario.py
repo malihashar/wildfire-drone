@@ -1,33 +1,4 @@
-"""
-Reproducible random wildfire-suppression scenario generator, shared by
-``tests/nsga_benchmark.py`` and ``tests/nsga_mavsdk_sitl.py``.
 
-Reuses the project's actual optimizer end-to-end -- nothing here reimplements
-NSGA-II:
-  - ``mission.optimizer.nsga2.NSGA2MissionOptimizer`` (pymoo NSGA-II)
-  - ``mission.simulation.targets.SuppressionTarget`` / ``DroneState``
-  - ``mission.simulation.environment.WildfireEnvironment``
-  - ``mission.config.settings.OptimizerConfig`` / ``TargetGenerationConfig``
-    (severity ranges only -- the *sampling scheme* mirrors
-    ``test_five_points_random.py``: ``r = R * sqrt(U)``, uniform angle,
-    minimum spacing, all within ``RADIUS_M`` of home)
-
-Coordinates are LOCAL NORTH/EAST METRE OFFSETS from home ``(0, 0)`` -- the
-same convention ``test_five_points_random.py`` and
-``mission.flight.mavsdk_controller`` use for GPS conversion. This is NOT the
-abstract 100x100 mission grid used elsewhere in the pipeline (D* Lite /
-ConvLSTM); NSGA-II's objectives (``mission.fitness.objectives``) only ever
-consume ``DroneState``/``SuppressionTarget`` ``.x``/``.y`` and don't care
-what units they're in, so this is a drop-in scenario, not a fork of the
-optimizer.
-
-``run_nsga2_with_deadline`` drives the SAME pymoo ``NSGA2`` algorithm and
-operators ``NSGA2MissionOptimizer.optimize`` uses (order crossover, inversion
-mutation, permutation sampling) -- it exists only because ``optimize()``
-hardcodes a fixed-generation ``get_termination("n_gen", ...)`` and has no
-wall-clock option. Swapping in pymoo's own ``TimeBasedTermination`` is a
-termination-criterion change, not a reimplementation of NSGA-II.
-"""
 
 from __future__ import annotations
 
@@ -52,8 +23,8 @@ from mission.optimizer.nsga2 import NSGA2MissionOptimizer, OptimizationResult
 from mission.simulation.environment import WildfireEnvironment
 from mission.simulation.targets import DroneState, SuppressionTarget
 
-RADIUS_M = 10.0
-MIN_SPACING_M = 5.0
+RADIUS_M = 15.0
+MIN_SPACING_M = 7.0
 MIN_TARGETS = 7
 MAX_TARGETS = 10
 MAX_SAMPLE_ATTEMPTS = 10_000
@@ -96,11 +67,7 @@ def _sample_offsets(rng: np.random.Generator, n: int) -> list[tuple[float, float
 
 
 def generate_scenario(seed: int, optimizer_config: OptimizerConfig | None = None) -> Scenario:
-    """
-    Build one reproducible scenario: 7-10 targets, each within RADIUS_M of
-    home, at least MIN_SPACING_M apart, with severity drawn from the
-    project's existing ``TargetGenerationConfig`` ranges.
-    """
+    
     rng = np.random.default_rng(seed)
     n_targets = int(rng.integers(MIN_TARGETS, MAX_TARGETS + 1))
     offsets = _sample_offsets(rng, n_targets)
@@ -137,14 +104,7 @@ def run_nsga2_with_deadline(
     seed: int,
     deadline_s: float,
 ) -> tuple[OptimizationResult, float, int]:
-    """
-    Run the project's exact NSGA-II operators (order crossover, inversion
-    mutation, permutation sampling -- copied from
-    ``NSGA2MissionOptimizer.optimize`` verbatim) against a wall-clock
-    deadline instead of a fixed generation count, then decode/select the
-    final Pareto set via the SAME ``_build_result`` the optimizer normally
-    uses. Returns ``(result, elapsed_s, generations_completed)``.
-    """
+   
     config = optimizer.config
     algorithm = NSGA2(
         pop_size=config.population_size,

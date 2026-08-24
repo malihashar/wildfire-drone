@@ -104,6 +104,87 @@ class MissionResult:
     landed: bool = False
 
 
+# ─────────────────────── arm_drone diagnostics ──────────────────────────
+
+
+@dataclass
+class HealthWatch:
+    """Latest values from background telemetry subscriptions, for diagnostics only."""
+
+    health: object | None = None
+    gps_info: object | None = None
+    status_lines: Deque[str] = field(default_factory=lambda: deque(maxlen=20))
+
+
+def health_checks(health) -> list[tuple[str, bool]]:
+    return [
+        ("global position", health.is_global_position_ok),
+        ("home position", health.is_home_position_ok),
+        ("local position", health.is_local_position_ok),
+        ("gyrometer calibration", health.is_gyrometer_calibration_ok),
+        ("accelerometer calibration", health.is_accelerometer_calibration_ok),
+        ("magnetometer calibration", health.is_magnetometer_calibration_ok),
+        ("armable", health.is_armable),
+    ]
+
+
+def format_health(health) -> str:
+    return "\n".join(
+        f"  [{'OK' if ok else 'FAIL'}] {name}" for name, ok in health_checks(health)
+    )
+
+
+def format_gps(gps_info) -> str:
+    return f"  [GPS] fix={gps_info.fix_type.name} satellites={gps_info.num_satellites}"
+
+
+async def watch_health(drone: System, watch: HealthWatch) -> None:
+    async for health in drone.telemetry.health():
+        watch.health = health
+
+
+async def watch_gps_info(drone: System, watch: HealthWatch) -> None:
+    async for gps_info in drone.telemetry.gps_info():
+        watch.gps_info = gps_info
+
+
+async def watch_status_text(drone: System, watch: HealthWatch) -> None:
+    async for status in drone.telemetry.status_text():
+        line = f"[STATUSTEXT/{status.type.name}] {status.text}"
+        print(line)
+        watch.status_lines.append(line)
+
+
+def status_log(watch: HealthWatch) -> str:
+    if not watch.status_lines:
+        return "  (no STATUSTEXT messages received)"
+    return "\n".join(watch.status_lines)
+
+
+def health_failure_report(watch: HealthWatch) -> str:
+    """Builds the specific underlying reason for a pre-arm health check timeout."""
+    if watch.health is not None:
+        failing = [name for name, ok in health_checks(watch.health) if not ok]
+        reason = (
+            ", ".join(failing)
+            if failing
+            else "unspecified (all known flags read OK, but health_all_ok() never reported ready)"
+        )
+        snapshot = format_health(watch.health)
+    else:
+        reason = "no health telemetry received from the vehicle"
+        snapshot = "  (no health telemetry received)"
+
+    gps_line = format_gps(watch.gps_info) if watch.gps_info is not None else "  [GPS] no gps_info telemetry received"
+
+    return (
+        "Pre-arm health check did not pass within timeout. "
+        f"Failing checks: {reason}.\n"
+        f"Health snapshot:\n{snapshot}\n{gps_line}\n"
+        f"Recent vehicle status messages:\n{status_log(watch)}"
+    )
+
+
 # ────────────────────────────── arm_drone ───────────────────────────────
 
 
@@ -121,26 +202,52 @@ async def arm_drone(
     attempting ``action.arm()``. Does not connect and does not take off --
     connection is the caller's responsibility (see ``mission`` for the
     full connect -> verify -> arm -> fly sequence).
-    """
-    deadline = asyncio.get_event_loop().time() + health_timeout_s
-    healthy = False
-    async for ok in drone.telemetry.health_all_ok():
-        if ok:
-            healthy = True
-            break
-        if asyncio.get_event_loop().time() >= deadline:
-            break
-        await asyncio.sleep(poll_interval_s)
 
-    if not healthy:
-        return ArmResult(False, "Pre-arm health check did not pass within timeout.")
+    While waiting, background subscriptions track the individual health
+    flags, GPS fix, and STATUSTEXT messages so that a timeout or a rejected
+    arm can be reported with the specific underlying reason rather than a
+    generic message.
+    """
+    watch = HealthWatch()
+    watchers = [
+        asyncio.create_task(watch_health(drone, watch)),
+        asyncio.create_task(watch_gps_info(drone, watch)),
+        asyncio.create_task(watch_status_text(drone, watch)),
+    ]
 
     try:
-        await drone.action.arm()
-    except ActionError as exc:
-        return ArmResult(False, f"Arm rejected: {exc}")
+        deadline = asyncio.get_event_loop().time() + health_timeout_s
+        healthy = False
+        async for ok in drone.telemetry.health_all_ok():
+            if ok:
+                healthy = True
+                break
+            if asyncio.get_event_loop().time() >= deadline:
+                break
+            await asyncio.sleep(poll_interval_s)
 
-    return ArmResult(True, "Armed.")
+        if not healthy:
+            return ArmResult(False, health_failure_report(watch))
+
+        print("Pre-arm telemetry snapshot (health check passed):")
+        if watch.health is not None:
+            print(format_health(watch.health))
+        if watch.gps_info is not None:
+            print(format_gps(watch.gps_info))
+
+        try:
+            await drone.action.arm()
+        except ActionError as exc:
+            return ArmResult(
+                False,
+                f"Arm rejected: {exc}\nRecent vehicle status messages:\n{status_log(watch)}",
+            )
+
+        return ArmResult(True, "Armed.")
+    finally:
+        for task in watchers:
+            task.cancel()
+        await asyncio.gather(*watchers, return_exceptions=True)
 
 
 # ──────────────────────────── connection ────────────────────────────────

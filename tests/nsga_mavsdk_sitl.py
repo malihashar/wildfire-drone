@@ -55,11 +55,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mavsdk import System
+from mavsdk.action import ActionError
 from mavsdk.mission import MissionItem, MissionPlan
 
 from mission.flight.mavsdk_controller import arm_drone
 from mission.optimizer.nsga2 import NSGA2MissionOptimizer
-from nsga_scenario import generate_scenario, run_nsga2_with_deadline
+from nsga_scenario import RADIUS_M, generate_scenario, run_nsga2_with_deadline
+from nsga_visualization import save_mission_visualization
 
 # PX4 SITL UDP only. Do NOT point this at /dev/cu.*, /dev/tty.*, a USB
 # telemetry radio, or a physical Pixhawk.
@@ -68,6 +70,13 @@ SYSTEM_ADDRESS = "udpin://0.0.0.0:14540"
 CRUISE_ALTITUDE_M = 25.0
 ACCEPTANCE_RADIUS_M = 3.0
 OPTIMIZATION_DEADLINE_S = 2.0
+
+CONNECT_TIMEOUT_S = 30.0
+HEALTH_TIMEOUT_S = 60.0
+HOME_TIMEOUT_S = 30.0
+TAKEOFF_TIMEOUT_S = 30.0
+MISSION_TIMEOUT_S = 300.0
+LAND_TIMEOUT_S = 60.0
 
 _EARTH_RADIUS_M = 6_371_000.0
 
@@ -79,30 +88,63 @@ def _offset_latlon(lat_deg: float, lon_deg: float, north_m: float, east_m: float
     return lat_deg + d_lat, lon_deg + d_lon
 
 
-async def _wait_connected(drone: System) -> None:
-    print(f"Connecting to PX4 SITL on {SYSTEM_ADDRESS} ...")
-    await drone.connect(system_address=SYSTEM_ADDRESS)
-    print("Waiting for connection...")
+async def _connect_loop(drone: System) -> None:
     async for state in drone.core.connection_state():
         if state.is_connected:
             print("Connected to drone.")
             return
 
 
-async def _wait_global_position_ready(drone: System) -> None:
-    print("Waiting for global position and home position lock...")
+async def _health_loop(drone: System) -> None:
     async for health in drone.telemetry.health():
         if health.is_global_position_ok and health.is_home_position_ok:
             print("GPS and home position OK.")
             return
 
 
-async def _fetch_home(drone: System) -> tuple[float, float]:
-    print("Fetching home position...")
+async def _home_loop(drone: System) -> tuple[float, float]:
     async for home in drone.telemetry.home():
         print(f"Home: lat={home.latitude_deg:.7f}, lon={home.longitude_deg:.7f}")
         return home.latitude_deg, home.longitude_deg
     raise RuntimeError("Home position stream ended without a value.")
+
+
+async def _connect_and_wait(drone: System) -> None:
+    print(f"Connecting to PX4 SITL on {SYSTEM_ADDRESS} ...")
+    await drone.connect(system_address=SYSTEM_ADDRESS)
+    print("Waiting for connection...")
+    await _connect_loop(drone)
+
+
+async def _wait_connected(drone: System) -> None:
+    # ``drone.connect()`` itself (not just the connection_state() poll) can
+    # block indefinitely if the mavsdk_server subprocess never comes up --
+    # both must be inside the same timeout, not just the poll loop after it.
+    try:
+        await asyncio.wait_for(_connect_and_wait(drone), timeout=CONNECT_TIMEOUT_S)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(
+            f"No PX4 SITL connection on {SYSTEM_ADDRESS} within {CONNECT_TIMEOUT_S:.0f}s. "
+            "Is `make px4_sitl` running?"
+        ) from exc
+
+
+async def _wait_global_position_ready(drone: System) -> None:
+    print("Waiting for global position and home position lock...")
+    try:
+        await asyncio.wait_for(_health_loop(drone), timeout=HEALTH_TIMEOUT_S)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(
+            f"Global/home position not OK within {HEALTH_TIMEOUT_S:.0f}s."
+        ) from exc
+
+
+async def _fetch_home(drone: System) -> tuple[float, float]:
+    print("Fetching home position...")
+    try:
+        return await asyncio.wait_for(_home_loop(drone), timeout=HOME_TIMEOUT_S)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(f"No home position within {HOME_TIMEOUT_S:.0f}s.") from exc
 
 
 def _plan_mission(seed: int, deadline_s: float) -> tuple[list[int], list[tuple[float, float]], float, int]:
@@ -119,7 +161,11 @@ def _plan_mission(seed: int, deadline_s: float) -> tuple[list[int], list[tuple[f
 
     print(f"Running NSGA-II with a {deadline_s:.1f}s wall-clock deadline...")
     result, elapsed_s, n_gen = run_nsga2_with_deadline(optimizer, optimizer_seed, deadline_s)
-    print(f"NSGA-II stopped after {elapsed_s:.3f}s ({n_gen} generations), Pareto set size={result.n_solutions}")
+    gen_per_s = n_gen / elapsed_s if elapsed_s > 0 else float("inf")
+    print(
+        f"NSGA-II stopped after {elapsed_s:.3f}s  generations={n_gen}  "
+        f"gen/s={gen_per_s:.1f}  pareto_size={result.n_solutions}"
+    )
 
     if result.n_solutions == 0:
         raise RuntimeError("NSGA-II produced no feasible mission within the deadline.")
@@ -127,11 +173,28 @@ def _plan_mission(seed: int, deadline_s: float) -> tuple[list[int], list[tuple[f
     # Existing repo selection method: highest damage-prevented plan in the
     # Pareto set (see OptimizationResult.best_damage_plan in mission/optimizer/nsga2.py).
     best = result.best_damage_plan()
+    print(f"Selected path: {best.mission_order}")
     print(best.summary())
 
     id_to_target = {t.id: t for t in scenario.env.targets}
     target_ids = list(best.mission_order)
     ne_offsets = [(id_to_target[tid].x, id_to_target[tid].y) for tid in target_ids]
+
+    # Visualization only: runs exactly once, after NSGA-II is fully done and
+    # the final order is already decided -- optimizer runtime above (elapsed_s)
+    # was captured before this line, so plotting time is never counted in it.
+    # Draws the SAME scenario.env.targets / target_ids about to become GPS
+    # waypoints; nothing here feeds back into the optimizer or SITL execution.
+    viz_path = save_mission_visualization(
+        seed=seed,
+        all_targets=scenario.env.targets,
+        target_ids=target_ids,
+        damage_prevented=best.objectives.damage_prevented,
+        travel_distance=best.objectives.travel_distance,
+        radius_m=RADIUS_M,
+    )
+    print(f"Saved mission visualization: {viz_path}")
+
     return target_ids, ne_offsets, elapsed_s, n_gen
 
 
@@ -146,48 +209,75 @@ async def main() -> None:
 
     # --- MAVSDK / PX4 SITL execution ---
     drone = System()
-    await _wait_connected(drone)
-    await _wait_global_position_ready(drone)
-    home_lat, home_lon = await _fetch_home(drone)
+    try:
+        await _wait_connected(drone)
+        await _wait_global_position_ready(drone)
+        home_lat, home_lon = await _fetch_home(drone)
 
-    print(f"Converting {len(ne_offsets)} NSGA-II waypoints to GPS:")
-    waypoints: list[tuple[float, float]] = []
-    for tid, (north_m, east_m) in zip(target_ids, ne_offsets):
-        lat, lon = _offset_latlon(home_lat, home_lon, north_m, east_m)
-        waypoints.append((lat, lon))
-        print(f"  T{tid}: north={north_m:+.2f}m east={east_m:+.2f}m -> lat={lat:.7f}, lon={lon:.7f}")
+        print(f"Converting {len(ne_offsets)} NSGA-II waypoints to GPS:")
+        waypoints: list[tuple[float, float]] = []
+        for tid, (north_m, east_m) in zip(target_ids, ne_offsets):
+            lat, lon = _offset_latlon(home_lat, home_lon, north_m, east_m)
+            waypoints.append((lat, lon))
+            print(f"  T{tid}: north={north_m:+.2f}m east={east_m:+.2f}m -> lat={lat:.7f}, lon={lon:.7f}")
 
-    mission_items = [
-        MissionItem(
-            lat, lon,
-            CRUISE_ALTITUDE_M,
-            5.0,
-            True,
-            float("nan"),
-            float("nan"),
-            MissionItem.CameraAction.NONE,
-            float("nan"),
-            float("nan"),
-            ACCEPTANCE_RADIUS_M,
-            float("nan"),
-            float("nan"),
-            MissionItem.VehicleAction.NONE,
-        )
-        for lat, lon in waypoints
-    ]
+        mission_items = [
+            MissionItem(
+                lat, lon,
+                CRUISE_ALTITUDE_M,
+                5.0,
+                True,
+                float("nan"),
+                float("nan"),
+                MissionItem.CameraAction.NONE,
+                float("nan"),
+                float("nan"),
+                ACCEPTANCE_RADIUS_M,
+                float("nan"),
+                float("nan"),
+                MissionItem.VehicleAction.NONE,
+            )
+            for lat, lon in waypoints
+        ]
 
-    print(f"Uploading mission plan ({len(mission_items)} waypoints)...")
-    await drone.mission.upload_mission(MissionPlan(mission_items))
+        print(f"Uploading mission plan ({len(mission_items)} waypoints)...")
+        await drone.mission.upload_mission(MissionPlan(mission_items))
 
-    arm_result = await arm_drone(drone)
-    if not arm_result.success:
-        raise RuntimeError(f"Arm failed: {arm_result.message}")
-    print("Armed.")
+        arm_result = await arm_drone(drone)
+        if not arm_result.success:
+            raise RuntimeError(f"Arm failed: {arm_result.message}")
+        print("Armed.")
 
-    print("Starting mission...")
-    await drone.mission.start_mission()
+        await _takeoff(drone)
 
-    total_waypoints = len(mission_items)
+        print("Starting mission...")
+        await drone.mission.start_mission()
+
+        total_waypoints = len(mission_items)
+        await asyncio.wait_for(_run_mission(drone, total_waypoints), timeout=MISSION_TIMEOUT_S)
+
+        print(f"All {total_waypoints} waypoints complete.")
+        print("Returning to launch and landing...")
+        await _return_home_and_land(drone)
+        print("Landed.")
+
+    except Exception as exc:  # noqa: BLE001 - top-level mission safety net, must never leak the drone armed
+        print(f"\nMission aborted due to error: {exc}")
+        print("Attempting safe recovery (return-to-launch + land)...")
+        try:
+            await _return_home_and_land(drone)
+            print("Recovered: returned home and landed.")
+        except Exception as recovery_exc:  # noqa: BLE001 - best-effort safety net
+            print(f"Recovery ALSO failed: {recovery_exc}. Manual intervention required in SITL.")
+        raise
+
+    print(
+        f"\nDone. Plan: seed={args.seed} targets_visited={target_ids} "
+        f"nsga2_time={elapsed_s:.3f}s generations={n_gen}"
+    )
+
+
+async def _run_mission(drone: System, total_waypoints: int) -> None:
     last_reported = -1
 
     async def report_progress() -> None:
@@ -213,19 +303,47 @@ async def main() -> None:
     finally:
         position_task.cancel()
 
-    print(f"All {total_waypoints} waypoints complete.")
 
-    print("Returning to launch and landing...")
+async def _return_home_and_land(drone: System) -> None:
     await drone.action.return_to_launch()
+    try:
+        await asyncio.wait_for(_wait_landed(drone), timeout=LAND_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        print(f"Return-to-launch did not land within {LAND_TIMEOUT_S:.0f}s; forcing land().")
+        await drone.action.land()
+        await asyncio.wait_for(_wait_landed(drone), timeout=LAND_TIMEOUT_S)
+
+
+async def _wait_landed(drone: System) -> None:
     async for in_air in drone.telemetry.in_air():
         if not in_air:
-            break
-    print("Landed.")
+            return
 
-    print(
-        f"\nDone. Plan: seed={args.seed} targets_visited={target_ids} "
-        f"nsga2_time={elapsed_s:.3f}s generations={n_gen}"
-    )
+
+async def _wait_in_air(drone: System, *, timeout_s: float) -> bool:
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    async for in_air in drone.telemetry.in_air():
+        if in_air:
+            return True
+        if asyncio.get_event_loop().time() >= deadline:
+            return False
+
+
+async def _takeoff(drone: System) -> None:
+    try:
+        await drone.action.set_takeoff_altitude(CRUISE_ALTITUDE_M)
+    except ActionError:
+        pass  # optional; fall back to the vehicle's configured takeoff altitude
+
+    print("Taking off...")
+    try:
+        await drone.action.takeoff()
+    except ActionError as exc:
+        raise RuntimeError(f"Takeoff rejected: {exc}") from exc
+
+    if not await _wait_in_air(drone, timeout_s=TAKEOFF_TIMEOUT_S):
+        raise RuntimeError(f"Vehicle did not report in-air state within {TAKEOFF_TIMEOUT_S:.0f}s of takeoff.")
+    print("Airborne.")
 
 
 if __name__ == "__main__":

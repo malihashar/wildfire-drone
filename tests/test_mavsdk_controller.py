@@ -14,7 +14,7 @@ import asyncio
 import pytest
 from mavsdk.action import ActionError, ActionResult
 from mavsdk.core import ConnectionState
-from mavsdk.telemetry import Position
+from mavsdk.telemetry import FixType, GpsInfo, Health, Position, StatusText, StatusTextType
 
 from mission.flight.mavsdk_controller import (
     GeoOrigin,
@@ -45,16 +45,39 @@ class _FakeCore:
 
 
 class _FakeTelemetry:
-    def __init__(self, origin: GeoOrigin, *, converge: bool = True) -> None:
+    def __init__(
+        self,
+        origin: GeoOrigin,
+        *,
+        converge: bool = True,
+        healthy: bool = True,
+        health: Health | None = None,
+        gps_info: GpsInfo | None = None,
+        status_texts: tuple[StatusText, ...] = (),
+    ) -> None:
         self._origin = origin
         self._converge = converge
         self.lat = origin.home_latitude_deg
         self.lon = origin.home_longitude_deg
         self.alt = origin.home_absolute_altitude_m
         self._in_air = False
+        self._healthy = healthy
+        self._health = health or Health(True, True, True, True, True, True, True)
+        self._gps_info = gps_info or GpsInfo(12, FixType.FIX_3D)
+        self._status_texts = status_texts
 
     async def health_all_ok(self):
-        yield True
+        yield self._healthy
+
+    async def health(self):
+        yield self._health
+
+    async def gps_info(self):
+        yield self._gps_info
+
+    async def status_text(self):
+        for status in self._status_texts:
+            yield status
 
     async def in_air(self):
         yield self._in_air
@@ -96,9 +119,26 @@ class _FakeAction:
 
 
 class _FakeSystem:
-    def __init__(self, origin: GeoOrigin, *, connected: bool = True, converge: bool = True) -> None:
+    def __init__(
+        self,
+        origin: GeoOrigin,
+        *,
+        connected: bool = True,
+        converge: bool = True,
+        healthy: bool = True,
+        health: Health | None = None,
+        gps_info: GpsInfo | None = None,
+        status_texts: tuple[StatusText, ...] = (),
+    ) -> None:
         self.core = _FakeCore(connected=connected)
-        self.telemetry = _FakeTelemetry(origin, converge=converge)
+        self.telemetry = _FakeTelemetry(
+            origin,
+            converge=converge,
+            healthy=healthy,
+            health=health,
+            gps_info=gps_info,
+            status_texts=status_texts,
+        )
         self.action = _FakeAction(self.telemetry, converge=converge)
 
     async def connect(self, system_address=None):
@@ -188,3 +228,37 @@ async def test_arm_drone_reports_rejected_arm():
     result = await arm_drone(drone)
     assert not result.success
     assert "rejected" in result.message.lower() or "denied" in result.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_arm_drone_reports_specific_reason_on_health_timeout():
+    bad_health = Health(
+        is_gyrometer_calibration_ok=True,
+        is_accelerometer_calibration_ok=True,
+        is_magnetometer_calibration_ok=True,
+        is_local_position_ok=True,
+        is_global_position_ok=False,
+        is_home_position_ok=False,
+        is_armable=False,
+    )
+    drone = _FakeSystem(
+        ORIGIN,
+        healthy=False,
+        health=bad_health,
+        gps_info=GpsInfo(3, FixType.NO_FIX),
+        status_texts=(StatusText(StatusTextType.WARNING, "Preflight Fail: no global position"),),
+    )
+    result = await arm_drone(drone, health_timeout_s=0.05, poll_interval_s=0.01)
+
+    assert not result.success
+    assert not drone.action.armed
+    # the specific failing checks must be named in the "Failing checks:" summary line,
+    # not just the generic timeout sentence
+    failing_line = next(line for line in result.message.splitlines() if "Failing checks:" in line)
+    assert "global position" in failing_line
+    assert "home position" in failing_line
+    assert "armable" in failing_line
+    assert "gyrometer" not in failing_line
+    # GPS fix and STATUSTEXT context must also be surfaced
+    assert "NO_FIX" in result.message
+    assert "Preflight Fail: no global position" in result.message
